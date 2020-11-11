@@ -36,7 +36,7 @@ constraint active =
   [ xt(t) > 0 - maxrange /\ yt(t) > 0 - maxrange | t in TOWER ];
 
 constraint forall(t1, t2 in TOWER where t1 < t2 /\ range[t1] = range[t2])
-  (active[t2] -> active[t1]);
+  (active[t2] -> active[t1] /\ lex_lesseq([xt(t1), yt(t1)], [xt(t1), yt(t2)]));
 
 var int: total_active;
 constraint total_active = sum(active);
