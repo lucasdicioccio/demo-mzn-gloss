@@ -1,0 +1,16 @@
+
+nBuildings = 7;
+buildingPosition = [|1,1
+                    |1,2
+                    |2,2
+                    |5,5
+                    |6,6
+                    |5,6
+                    |4,5
+                    |];
+                    
+nTowers = 5;
+range = [1,1,3,3,3];
+price = [2,2,4,4,4];
+
+coverTarget = 1;
