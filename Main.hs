@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Main where
 
 import Data.IORef
@@ -12,23 +13,10 @@ import Data.Aeson
 import Data.Function
 import Data.Hashable
 import Process.Minizinc
+import Process.Minizinc.TH
 import Graphics.Gloss.Interface.IO.Animate
 
-data Input = Input {
-    buildingPosition::[[Int]]
-  , coverTarget::Int
-  , nBuildings::Int
-  , nTowers::Int
-  , price::[Int]
-  , range::[Int]
-  } deriving (Generic, ToJSON, Hashable)
-
-data Output = Output {
-    active::[Bool]
-  , total_active::Int
-  , total_cost::Int
-  , towerPosition::[[Int]]
-  } deriving (Generic, FromJSON, Show)
+genModelData "" "models/mzn-gloss.mzn"
 
 data Building = Building { xcoord :: Int , ycoord :: Int }
   deriving (Show, Ord, Eq)
@@ -72,12 +60,23 @@ towers =
   , Tower 15 3
   , Tower 15 3
   , Tower 15 3
+  , Tower 5 1
+  , Tower 5 1
+  , Tower 5 1
+  , Tower 5 1
+  , Tower 5 1
+  , Tower 10 2
+  , Tower 10 2
+  , Tower 10 2
+  , Tower 15 3
+  , Tower 15 3
+  , Tower 15 3
   ]
 
 input :: Input
 input = Input
   [ pos b | b <- buildings ]
-  1
+  2
   (length buildings)
   (length towers)
   [ towerPrice t | t <- towers ]
@@ -95,7 +94,7 @@ main = do
     runSolver :: IORef (Maybe Output) -> IO ()
     runSolver ioref = do
         let path = "models/mzn-gloss.mzn"
-        let mzn = simpleMiniZinc @Input @Output path 10000 Chuffed
+        let mzn = simpleMiniZinc @Input @Output path 100000 Chuffed
               & withArgs ["-a"]
         runMinizincJSON mzn input () (handler ioref)
 
