@@ -9,12 +9,13 @@ import Data.IORef
 import Control.Concurrent
 import Control.Monad
 import GHC.Generics
+import Data.List ((\\))
 import Data.Aeson
 import Data.Function
 import Data.Hashable
 import Process.Minizinc
 import Process.Minizinc.TH
-import Graphics.Gloss.Interface.IO.Animate
+import Graphics.Gloss.Interface.IO.Game
 
 genModelData "" "models/mzn-gloss.mzn"
 
@@ -24,26 +25,9 @@ data Building = Building { xcoord :: Int , ycoord :: Int }
 data Tower = Tower { towerPrice :: Int , towerRange :: Int }
   deriving (Show, Ord, Eq)
 
-buildings :: [Building]
-buildings =
-  [ Building 1 1
-  , Building 1 2
-  , Building 1 4
-  , Building 5 5
-  , Building 6 5
-  , Building 7 5
-  , Building 1 3
-  , Building 8 3
-  , Building 2 2
-  , Building 7 7
-  , Building 4 5
-  , Building 5 1
-  , Building 10 20
-  , Building 10 21
-  , Building 20 7
-  , Building 10 15
-  , Building 13 12
-  , Building 13 11
+defaultBuildings :: [Building]
+defaultBuildings =
+  [ 
   ]
 
 towers :: [Tower]
@@ -54,30 +38,30 @@ towers =
   , Tower 5 1
   , Tower 5 1
   , Tower 5 1
+  , Tower 5 1
+  , Tower 5 1
+  , Tower 5 1
+  , Tower 5 1
+  , Tower 5 1
+  , Tower 10 2
+  , Tower 10 2
+  , Tower 10 2
   , Tower 10 2
   , Tower 10 2
   , Tower 10 2
   , Tower 15 3
   , Tower 15 3
   , Tower 15 3
-  , Tower 5 1
-  , Tower 5 1
-  , Tower 5 1
-  , Tower 5 1
-  , Tower 5 1
-  , Tower 10 2
-  , Tower 10 2
-  , Tower 10 2
   , Tower 15 3
   , Tower 15 3
   , Tower 15 3
   ]
 
-input :: Input
-input = Input
-  [ pos b | b <- buildings ]
-  2
-  (length buildings)
+input :: [Building] -> Input
+input blds = Input
+  [ pos b | b <- blds ]
+  1
+  (length blds)
   (length towers)
   [ towerPrice t | t <- towers ]
   [ towerRange t | t <- towers ]
@@ -85,21 +69,27 @@ input = Input
     pos :: Building -> [Int]
     pos (Building x y) = [x,y]
 
+data World = World {
+    ioref :: IORef (Maybe Output)
+  , solverThread :: Maybe ThreadId
+  , buildings :: [ Building ]
+  }
+
 main :: IO ()
 main = do
     ioref <- newIORef Nothing
-    _ <- forkIO $ runSolver ioref
-    animateIO disp col (frame ioref) control
+    let world = World ioref Nothing defaultBuildings
+    playIO disp col 1 world render handleInput control
   where
-    runSolver :: IORef (Maybe Output) -> IO ()
-    runSolver ioref = do
+    runSolver :: Input -> IORef (Maybe Output) -> IO ()
+    runSolver input ioref = do
         let path = "models/mzn-gloss.mzn"
-        let mzn = simpleMiniZinc @Input @Output path 100000 Chuffed
+        let mzn = simpleMiniZinc @Input @Output path 300000 Chuffed
               & withArgs ["-a"]
-        runMinizincJSON mzn input () (handler ioref)
+        runMinizincJSON mzn input () (outputhandler ioref)
 
-    handler :: IORef (Maybe Output) -> ResultHandler Output ()
-    handler ioref = ResultHandler (handle1 ioref)
+    outputhandler :: IORef (Maybe Output) -> ResultHandler Output ()
+    outputhandler ioref = ResultHandler (handle1 ioref)
 
     handle1 :: IORef (Maybe Output)
             -> ()
@@ -107,30 +97,49 @@ main = do
             -> IO ((), Maybe (ResultHandler Output ()))
     handle1 ioref _ out = do
         writeIORef ioref $ result out
-        threadDelay 1000000
-        pure ((), Just $ handler ioref)
+        threadDelay 300000
+        pure ((), Just $ outputhandler ioref)
 
-    disp = InWindow "mzn-gloss" (400,400) (10,10)
+    disp = InWindow "mzn-gloss" (400,400) (0,0)
 
     col = white
 
-    frame ioref timeF = do
-        current <- readIORef ioref
-        print current
-        let towerPictures = case current of
+    render world = do
+       current <- readIORef (ioref world)
+       print current
+       let towerPictures = case current of
                               Nothing -> []
                               Just output ->
                                   zipWith3 renderTower towers (active output) (towerPosition output)
-        pure $ Pictures
-             [ Translate (-30) (30)
-             $ renderCost (fmap total_cost current)
-             , Scale 10 10
-             $ Translate (-10) (-10)
-             $ Pictures $ [ renderBuilding b | b <- buildings ]
-                        <> towerPictures
-             ]
+       pure $ Translate (-180) (-180)
+             $ Pictures
+                 [ Translate (-10) (-10) $ renderCost (fmap total_cost current)
+                 , Pictures $ [ renderBuilding b | b <- buildings world ] <> towerPictures
+                 ]
+    handleInput (EventKey (SpecialKey KeySpace) Down _ _) w = do
+       restartSolver w
+    handleInput (EventKey (MouseButton LeftButton) Down _ (x,y)) w = do
+       reverseBuilding w (reverseCoord x, reverseCoord y) >>= restartSolver
+    handleInput _ w = pure w
 
-    control ctrl = controllerSetRedraw ctrl
+    reverseCoord v = ceiling $ (v + 180) / 10 - 0.5
+
+    restartSolver w = do
+          case solverThread w of
+              Nothing -> pure ()
+              Just otId -> killThread otId
+          writeIORef (ioref w) Nothing
+          tId <- forkIO $ runSolver (input $ buildings w) (ioref w)
+          pure $ w { solverThread = Just tId }
+
+    reverseBuilding world (x,y) = do
+          let b = Building x y
+          if b `elem` (buildings world)
+          then pure $ world { buildings = buildings world \\ [b]}
+          else pure $ world { buildings = b : buildings world }
+       
+
+    control dt w = pure w
 
 renderCost :: Maybe Int -> Picture
 renderCost val = Color black
@@ -143,12 +152,14 @@ renderCost val = Color black
 
 renderBuilding :: Building -> Picture
 renderBuilding (Building x y) = Color blue
-  $ Translate (fromIntegral x) (fromIntegral y)
+  $ Translate (10 * fromIntegral x) (10 * fromIntegral y)
+  $ Scale (10.0) (10.0)
   $ Translate (-0.5) (-0.5)
   $ Polygon [(0,0),(1,0),(1,1),(0,1)]
 
 renderTower :: Tower -> Bool -> [Int] -> Picture
 renderTower (Tower _ r) True (x:y:[]) = Color red
-  $ Translate (fromIntegral x) (fromIntegral y)
+  $ Translate (10 * fromIntegral x) (10 * fromIntegral y)
+  $ Scale (10.0) (10.0)
   $ Circle (fromIntegral r)
 renderTower _ _ _ = Blank
